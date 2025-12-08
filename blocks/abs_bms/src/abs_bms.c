@@ -33,25 +33,22 @@ static const uint8_t toc_soc = 91u;
 static const uint8_t boc_soc = 5u;
 static float abs_bms_user_soc_scale(const float soc);
 
-void abs_bms_init(const uint8_t ticks_per_s, const fp_can_send can_send,
-                  struct abs_bms_data_t* data) {
+void abs_bms_init(struct abs_bms_data_t* data) {
     memset(data, 0, sizeof(struct abs_bms_data_t));
-    data->ticks_per_s = ticks_per_s;
-    data->can_send = can_send;
 
     // We are timed out until we get a message
-    data->timeout = true;
-    data->can_tick_counter = (data->ticks_per_s * 2) + 1;
+    data->outputs.timeout = true;
+    data->internal.can_tick_counter = (data->config.ticks_per_s * 2) + 1;
 
     // active by default - user control not enabled.
-    data->isolation_monitor_enabled = true;
+    data->outputs.isolation_monitor_enabled = true;
 }
 
 void abs_bms_parse_can(uint32_t can_id, uint8_t* buf, struct abs_bms_data_t* data) {
     switch (can_id) {
         case ABS_BMS_NF_BATT_STATE_FRAME_ID:
             abs_bms_nf_batt_state_deserialize(data, buf);
-            data->can_tick_counter = 0;
+            data->internal.can_tick_counter = 0;
             break;
 
         case ABS_BMS_NF_BATT_SYS_TEMP_MODULE_FRAME_ID:
@@ -97,15 +94,15 @@ void abs_bms_parse_can(uint32_t can_id, uint8_t* buf, struct abs_bms_data_t* dat
 
 static bool is_asleep;
 void abs_bms_tick(struct abs_bms_data_t* data) {
-    switch (data->bms_state) {
+    switch (data->outputs.bms_state) {
         case ABS_BMS_NF_BATT_STATE_BATT_SYS_STATE_STAND_BY_READY_CHOICE:
-            data->close_contactors_cmd =
-                (data->state_cmd == ABS_BMS_NF_APP_COMMAND_APP_STATE_REQ_MODE_DISCHARGE_CHOICE ||
-                 data->state_cmd == ABS_BMS_NF_APP_COMMAND_APP_STATE_REQ_MODE_CHARGE_CHOICE);
+            data->inputs.close_contactors_cmd =
+                (data->inputs.state_cmd == ABS_BMS_NF_APP_COMMAND_APP_STATE_REQ_MODE_DISCHARGE_CHOICE ||
+                 data->inputs.state_cmd == ABS_BMS_NF_APP_COMMAND_APP_STATE_REQ_MODE_CHARGE_CHOICE);
             break;
 
 	case ABS_BMS_NF_BATT_STATE_BATT_SYS_STATE_DISCONNECT_CHOICE:
-	    data->close_contactors_cmd = false;
+	    data->inputs.close_contactors_cmd = false;
 
         default:
             break;
@@ -113,45 +110,45 @@ void abs_bms_tick(struct abs_bms_data_t* data) {
 
     // Send at 100ms
     // if OFF requested, send one frame then silence CAN messages.
-    if (data->startup_counter % 10 == 0) {
-        if (data->sleep_cmd) {
-            data->state_cmd = ABS_BMS_NF_APP_COMMAND_APP_STATE_REQ_MODE_OFF_CHOICE;
+    if (data->internal.startup_counter % 10 == 0) {
+        if (data->inputs.sleep_cmd) {
+            data->inputs.state_cmd = ABS_BMS_NF_APP_COMMAND_APP_STATE_REQ_MODE_OFF_CHOICE;
         }
         if (!is_asleep) {
             abs_bms_app_command_send(data);
         }
-        is_asleep = data->sleep_cmd;
+        is_asleep = data->inputs.sleep_cmd;
     }
 
-    counter_inc(&(data->can_tick_counter));
-    data->startup_counter++;
-    data->timeout = false;
+    counter_inc(&(data->internal.can_tick_counter));
+    data->internal.startup_counter++;
+    data->outputs.timeout = false;
     // Reset the data if the OBC has timed out
-    if (data->can_tick_counter > (data->ticks_per_s * 2)) {
-        data->max_charge_current = 0;
-        data->max_charge_voltage = 0;
-        data->pack_voltage = 0;
-        data->pack_current = 0;
-        data->max_discharge_current = 0;
-        data->soh = 0;
-        data->soc = 0;
-        data->energy_remain = 0;
-        data->temp_inlet = 0;
-        data->temp_outlet = 0;
-        data->pressure_inlet = 0;
-        data->iso_min_str_id = 0;
-        data->iso_min = 0;
-        data->iso_max_str_id = 0;
-        data->iso_max = 0;
-        data->min_cell_temp = 0;
-        data->max_cell_temp = 0;
-        data->bms_state = 0;
-        data->bms_hvil_closed = false;
-        data->close_contactors_cmd = false;
-        data->state_cmd = ABS_BMS_NF_APP_COMMAND_APP_STATE_REQ_MODE_OFF_CHOICE;
-        data->timeout = true;
+    if (data->internal.can_tick_counter > (data->config.ticks_per_s * 2)) {
+        data->outputs.max_charge_current = 0;
+        data->outputs.max_charge_voltage = 0;
+        data->outputs.pack_voltage = 0;
+        data->outputs.pack_current = 0;
+        data->outputs.max_discharge_current = 0;
+        data->outputs.soh = 0;
+        data->outputs.soc = 0;
+        data->outputs.energy_remain = 0;
+        data->outputs.temp_inlet = 0;
+        data->outputs.temp_outlet = 0;
+        data->outputs.pressure_inlet = 0;
+        data->outputs.iso_min_str_id = 0;
+        data->outputs.iso_min = 0;
+        data->outputs.iso_max_str_id = 0;
+        data->outputs.iso_max = 0;
+        data->outputs.min_cell_temp = 0;
+        data->outputs.max_cell_temp = 0;
+        data->outputs.bms_state = 0;
+        data->outputs.bms_hvil_closed = false;
+        data->inputs.close_contactors_cmd = false;
+        data->inputs.state_cmd = ABS_BMS_NF_APP_COMMAND_APP_STATE_REQ_MODE_OFF_CHOICE;
+        data->outputs.timeout = true;
     } else {
-        data->timeout = false;
+        data->outputs.timeout = false;
     }
 }
 
@@ -160,12 +157,12 @@ void abs_bms_app_command_send(const struct abs_bms_data_t* data) {
     struct abs_bms_nf_app_command_t bms_command;
     abs_bms_nf_app_command_init(&bms_command);
     bms_command.app_state_req_mode =
-        abs_bms_nf_app_command_app_state_req_mode_encode(data->state_cmd);
+        abs_bms_nf_app_command_app_state_req_mode_encode(data->inputs.state_cmd);
     bms_command.app_comm_rolling_count =
-        abs_bms_nf_app_command_app_comm_rolling_count_encode(data->can_tick_counter);
+        abs_bms_nf_app_command_app_comm_rolling_count_encode(data->internal.can_tick_counter);
     bms_command.app_balancing_enable_f = abs_bms_nf_app_command_app_balancing_enable_f_encode(true);
     bms_command.app_contactor_command =
-        data->close_contactors_cmd ? ABS_BMS_NF_APP_COMMAND_APP_CONTACTOR_COMMAND_CLOSE_CHOICE
+        data->inputs.close_contactors_cmd ? ABS_BMS_NF_APP_COMMAND_APP_CONTACTOR_COMMAND_CLOSE_CHOICE
                                    : ABS_BMS_NF_APP_COMMAND_APP_CONTACTOR_COMMAND_OPEN_CHOICE;
 
     abs_bms_nf_app_command_pack(buffer, &bms_command, ABS_BMS_NF_APP_COMMAND_LENGTH);
@@ -177,8 +174,8 @@ void abs_bms_nf_batt_state_deserialize(struct abs_bms_data_t* dst, const uint8_t
     struct abs_bms_nf_batt_state_t state;
     abs_bms_nf_batt_state_init(&state);
     abs_bms_nf_batt_state_unpack(&state, src, ABS_BMS_NF_BATT_STATE_LENGTH);
-    dst->bms_state = state.batt_sys_state;  // 1:1 with DBC.
-    dst->bms_hvil_closed =
+    dst->outputs.bms_state = state.batt_sys_state;  // 1:1 with DBC.
+    dst->outputs.bms_hvil_closed =
         ABS_BMS_NF_BATT_STATE_BATT_HVIL_STATUS_VALID_CHOICE == state.batt_hvil_status;
 }
 
@@ -186,9 +183,9 @@ void abs_bms_nf_batt_sys_temp_module_deserialize(struct abs_bms_data_t* dst, con
     struct abs_bms_nf_batt_sys_temp_module_t state;
     abs_bms_nf_batt_sys_temp_module_init(&state);
     abs_bms_nf_batt_sys_temp_module_unpack(&state, src, ABS_BMS_NF_BATT_SYS_TEMP_MODULE_LENGTH);
-    dst->min_cell_temp = abs_bms_nf_batt_sys_temp_module_batt_sys_temp_module_min_decode(
+    dst->outputs.min_cell_temp = abs_bms_nf_batt_sys_temp_module_batt_sys_temp_module_min_decode(
         state.batt_sys_temp_module_min);
-    dst->max_cell_temp = abs_bms_nf_batt_sys_temp_module_batt_sys_temp_module_max_decode(
+    dst->outputs.max_cell_temp = abs_bms_nf_batt_sys_temp_module_batt_sys_temp_module_max_decode(
         state.batt_sys_temp_module_max);
 }
 
@@ -196,7 +193,7 @@ void abs_bms_nf_batt_sys_sohc_deserialize(struct abs_bms_data_t* dst, const uint
     struct abs_bms_nf_batt_sys_sohc_t state;
     abs_bms_nf_batt_sys_sohc_init(&state);
     abs_bms_nf_batt_sys_sohc_unpack(&state, src, ABS_BMS_NF_BATT_SYS_SOHC_LENGTH);
-    dst->soh =
+    dst->outputs.soh =
         abs_bms_nf_batt_sys_sohc_batt_sys_sohc_module_avg_decode(state.batt_sys_sohc_module_avg);
 }
 
@@ -207,8 +204,8 @@ void abs_bms_nf_batt_sys_soc_deserialize(struct abs_bms_data_t* dst, const uint8
     abs_bms_nf_batt_sys_soc_init(&state);
     abs_bms_nf_batt_sys_soc_unpack(&state, src, ABS_BMS_NF_BATT_SYS_SOC_LENGTH);
     soc = abs_bms_nf_batt_sys_soc_batt_sys_soc_string_avg_decode(state.batt_sys_soc_string_avg);
-    dst->soc = abs_bms_user_soc_scale(soc);
-    dst->energy_remain =
+    dst->outputs.soc = abs_bms_user_soc_scale(soc);
+    dst->outputs.energy_remain =
         abs_bms_nf_batt_sys_soc_batt_sys_energy_system_decode(state.batt_sys_energy_system);
 }
 
@@ -216,9 +213,9 @@ void abs_bms_nf_batt_sys_volt_cell_deserialize(struct abs_bms_data_t* dst, const
     struct abs_bms_nf_batt_sys_volt_cell_t state;
     abs_bms_nf_batt_sys_volt_cell_init(&state);
     abs_bms_nf_batt_sys_volt_cell_unpack(&state, src, ABS_BMS_NF_BATT_SYS_VOLT_CELL_LENGTH);
-    dst->max_cell_voltage =
+    dst->outputs.max_cell_voltage =
         abs_bms_nf_batt_sys_volt_cell_batt_sys_volt_cell_max_decode(state.batt_sys_volt_cell_max);
-    dst->min_cell_voltage =
+    dst->outputs.min_cell_voltage =
         abs_bms_nf_batt_sys_volt_cell_batt_sys_volt_cell_min_decode(state.batt_sys_volt_cell_min);
 }
 
@@ -226,9 +223,9 @@ void abs_bms_nf_batt_limits_charger_deserialize(struct abs_bms_data_t* dst, cons
     struct abs_bms_nf_batt_limits_charger_t state;
     abs_bms_nf_batt_limits_charger_init(&state);
     abs_bms_nf_batt_limits_charger_unpack(&state, src, ABS_BMS_NF_BATT_LIMITS_CHARGER_LENGTH);
-    dst->max_charge_current =
+    dst->outputs.max_charge_current =
         abs_bms_nf_batt_limits_charger_batt_limit_chrgr_crrnt_decode(state.batt_limit_chrgr_crrnt);
-    dst->max_charge_voltage =
+    dst->outputs.max_charge_voltage =
         abs_bms_nf_batt_limits_charger_batt_limit_chrgr_volt_decode(state.batt_limit_chrgr_volt);
 }
 
@@ -236,9 +233,9 @@ void abs_bms_nf_batt_limits_discharge_deserialize(struct abs_bms_data_t* dst, co
     struct abs_bms_nf_batt_limits_discharge_t state;
     abs_bms_nf_batt_limits_discharge_init(&state);
     abs_bms_nf_batt_limits_discharge_unpack(&state, src, ABS_BMS_NF_BATT_LIMITS_DISCHARGE_LENGTH);
-    dst->max_discharge_current = abs_bms_nf_batt_limits_discharge_batt_limit_dschrg_crrnt_decode(
+    dst->outputs.max_discharge_current = abs_bms_nf_batt_limits_discharge_batt_limit_dschrg_crrnt_decode(
         state.batt_limit_dschrg_crrnt);
-    dst->max_discharge_power =
+    dst->outputs.max_discharge_power =
         abs_bms_nf_batt_limits_discharge_batt_limit_dschrg_pwr_short_term_decode(
             state.batt_limit_dschrg_pwr_short_term);
 }
@@ -247,7 +244,7 @@ void abs_bms_nf_batt_current_deserialize(struct abs_bms_data_t* dst, const uint8
     struct abs_bms_nf_batt_current_t state;
     abs_bms_nf_batt_current_init(&state);
     abs_bms_nf_batt_current_unpack(&state, src, ABS_BMS_NF_BATT_CURRENT_LENGTH);
-    dst->pack_current =
+    dst->outputs.pack_current =
         abs_bms_nf_batt_current_batt_current_system_decode(state.batt_current_system);
 }
 
@@ -255,7 +252,7 @@ void abs_bms_nf_batt_sys_volt_string_deserialize(struct abs_bms_data_t* dst, con
     struct abs_bms_nf_batt_sys_volt_string_t state;
     abs_bms_nf_batt_sys_volt_string_init(&state);
     abs_bms_nf_batt_sys_volt_string_unpack(&state, src, ABS_BMS_NF_BATT_SYS_VOLT_STRING_LENGTH);
-    dst->pack_voltage = abs_bms_nf_batt_sys_volt_string_batt_sys_volt_string_max_decode(
+    dst->outputs.pack_voltage = abs_bms_nf_batt_sys_volt_string_batt_sys_volt_string_max_decode(
         state.batt_sys_volt_string_max);
 }
 
@@ -263,12 +260,12 @@ void abs_bms_nf_batt_iso_res_frame_deserialize(struct abs_bms_data_t* dst, const
     struct abs_bms_nf_batt_iso_res_t state;
     abs_bms_nf_batt_iso_res_init(&state);
     abs_bms_nf_batt_iso_res_unpack(&state, src, ABS_BMS_NF_BATT_ISO_RES_LENGTH);
-    dst->iso_min_str_id =
+    dst->outputs.iso_min_str_id =
         abs_bms_nf_batt_iso_res_batt_iso_res_min_str_id_decode(state.batt_iso_res_min_str_id);
-    dst->iso_min = abs_bms_nf_batt_iso_res_batt_iso_res_min_decode(state.batt_iso_res_min);
-    dst->iso_max_str_id =
+    dst->outputs.iso_min = abs_bms_nf_batt_iso_res_batt_iso_res_min_decode(state.batt_iso_res_min);
+    dst->outputs.iso_max_str_id =
         abs_bms_nf_batt_iso_res_batt_iso_res_max_str_id_decode(state.batt_iso_res_max_str_id);
-    dst->iso_max = abs_bms_nf_batt_iso_res_batt_iso_res_max_decode(state.batt_iso_res_max);
+    dst->outputs.iso_max = abs_bms_nf_batt_iso_res_batt_iso_res_max_decode(state.batt_iso_res_max);
 }
 
 float abs_bms_user_soc_scale(const float soc) {
