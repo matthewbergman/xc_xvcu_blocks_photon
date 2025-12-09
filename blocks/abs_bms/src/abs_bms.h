@@ -8,7 +8,7 @@
 typedef void (*fp_can_send)(uint32_t, bool, uint8_t, uint8_t*);
 
 struct abs_bms_inputs_t {
-	float charge_power_available;  // kW
+	float charge_power_available;  // Unit:kW
     bool isolation_monitor_cmd;
 
     uint8_t state_cmd;
@@ -18,32 +18,28 @@ struct abs_bms_inputs_t {
 };
 
 struct abs_bms_outputs_t {
-	float max_charge_current;     // A
-    float max_charge_voltage;     // V
-    float pack_voltage;           // V
-    float pack_current;           // A
-    float max_discharge_current;  // A
-    float max_discharge_power;    // kW
+	float max_charge_current;     // Unit:A
+    float max_charge_voltage;     // Unit:V
+    float pack_voltage;           // Unit:V
+    float pack_current;           // Unit:A
+    float max_discharge_current;  // Unit:A
+    float max_discharge_power;    // Unit:kW
 
-    float soh;            // %
-    float soc;            // %
-    float energy_remain;  // kWh
+    float soh;            // Unit:%
+    float soc;            // Unit:%
+    float energy_remain;  // Unit:kWh
 
-    float temp_inlet;      // C
-    float temp_outlet;     // C
-    float pressure_inlet;  // mbar
+    float temp_inlet;      // Unit:C
+    float temp_outlet;     // Unit:C
+    float pressure_inlet;  // Unit:mbar
 
-    uint8_t iso_min_str_id;
-    uint16_t iso_min;
+    uint16_t isolation;     // Unit:KOhms
 
-    uint8_t iso_max_str_id;
-    uint16_t iso_max;
+    float min_cell_temp;  // Unit:C
+    float max_cell_temp;  // Unit:C
 
-    float min_cell_temp;  // C
-    float max_cell_temp;  // C
-
-    float min_cell_voltage;  // V
-    float max_cell_voltage;  // V
+    float min_cell_voltage;  // Unit:V
+    float max_cell_voltage;  // Unit:V
 
     uint8_t bms_state;
     bool bms_hvil_closed;
