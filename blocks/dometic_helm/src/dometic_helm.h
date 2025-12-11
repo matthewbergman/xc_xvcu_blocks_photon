@@ -18,20 +18,20 @@
 struct dometic_helm_outputs_t {
 	Direction gear_cmd_port;
 	Direction gear_cmd_stbd;
-	float throttle_cmd_port;
-	float throttle_cmd_stbd;
+	float throttle_cmd_port;	// Unit: %
+	float throttle_cmd_stbd;	// Unit: %
 	bool danger_fault;
-	bool ch_controlling;
+	bool ch_controlling;	// Notes: Control head is controlling vs joystick
 	bool timeout;
 };
 
 struct dometic_helm_inputs_t {
 	Direction gear_actual_port;
 	Direction gear_actual_stbd;
-	float throttle_actual_port;
-	float throttle_actual_stbd;
-	float engine_speed_port;
-	float engine_speed_stbd;
+	float throttle_actual_port;	// Unit: %
+	float throttle_actual_stbd; // Unit: %
+	float engine_speed_port; // Unit: RPM
+	float engine_speed_stbd; // Unit: RPM
 	bool danger_fault;
 };
 
@@ -43,7 +43,7 @@ struct dometic_helm_internal_t {
 
 struct dometic_helm_config_t {
 	uint8_t ticks_per_s;
-	float idle_speed;
+	float idle_speed; // Unit: RPM
 	void (*can_send)(uint32_t, bool, uint8_t, uint8_t*); // ID, len, data buffer
 };
 

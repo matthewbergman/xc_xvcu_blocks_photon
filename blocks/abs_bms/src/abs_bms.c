@@ -5,8 +5,8 @@
 #include <stdint.h>
 #include <string.h>
 
-#include "../components/counter.h"
-#include "abs_bms_nf.h"
+#include "../../../utils/counter.h"
+#include "can/abs_bms_nf.h"
 
 /* sets command values from system state and sends command message to bms */
 static void abs_bms_app_command_send(const struct abs_bms_data_t* data);
@@ -92,37 +92,11 @@ void abs_bms_parse_can(uint32_t can_id, uint8_t* buf, struct abs_bms_data_t* dat
     }
 }
 
-static bool is_asleep;
 void abs_bms_tick(struct abs_bms_data_t* data) {
-    switch (data->outputs.bms_state) {
-        case ABS_BMS_NF_BATT_STATE_BATT_SYS_STATE_STAND_BY_READY_CHOICE:
-            data->inputs.close_contactors_cmd =
-                (data->inputs.state_cmd == ABS_BMS_NF_APP_COMMAND_APP_STATE_REQ_MODE_DISCHARGE_CHOICE ||
-                 data->inputs.state_cmd == ABS_BMS_NF_APP_COMMAND_APP_STATE_REQ_MODE_CHARGE_CHOICE);
-            break;
-
-	case ABS_BMS_NF_BATT_STATE_BATT_SYS_STATE_DISCONNECT_CHOICE:
-	    data->inputs.close_contactors_cmd = false;
-
-        default:
-            break;
-    }
-
-    // Send at 100ms
-    // if OFF requested, send one frame then silence CAN messages.
-    if (data->internal.startup_counter % 10 == 0) {
-        if (data->inputs.sleep_cmd) {
-            data->inputs.state_cmd = ABS_BMS_NF_APP_COMMAND_APP_STATE_REQ_MODE_OFF_CHOICE;
-        }
-        if (!is_asleep) {
-            abs_bms_app_command_send(data);
-        }
-        is_asleep = data->inputs.sleep_cmd;
-    }
-
     counter_inc(&(data->internal.can_tick_counter));
     data->internal.startup_counter++;
     data->outputs.timeout = false;
+
     // Reset the data if the OBC has timed out
     if (data->internal.can_tick_counter > (data->config.ticks_per_s * 2)) {
         data->outputs.max_charge_current = 0;
@@ -136,45 +110,102 @@ void abs_bms_tick(struct abs_bms_data_t* data) {
         data->outputs.temp_inlet = 0;
         data->outputs.temp_outlet = 0;
         data->outputs.pressure_inlet = 0;
-        data->outputs.iso_min_str_id = 0;
-        data->outputs.iso_min = 0;
-        data->outputs.iso_max_str_id = 0;
-        data->outputs.iso_max = 0;
+        data->outputs.isolation = 0;
         data->outputs.min_cell_temp = 0;
         data->outputs.max_cell_temp = 0;
-        data->outputs.bms_state = 0;
+        data->outputs.state_ready = 0;
+        data->outputs.state_drive = 0;
+        data->outputs.state_charge = 0;
+        data->outputs.state_disconnect = 0;
         data->outputs.bms_hvil_closed = false;
-        data->inputs.close_contactors_cmd = false;
-        data->inputs.state_cmd = ABS_BMS_NF_APP_COMMAND_APP_STATE_REQ_MODE_OFF_CHOICE;
         data->outputs.timeout = true;
     } else {
         data->outputs.timeout = false;
     }
 }
 
+static bool quiet;
 void abs_bms_app_command_send(const struct abs_bms_data_t* data) {
     uint8_t buffer[ABS_BMS_NF_APP_COMMAND_LENGTH] = {0};
     struct abs_bms_nf_app_command_t bms_command;
     abs_bms_nf_app_command_init(&bms_command);
-    bms_command.app_state_req_mode =
-        abs_bms_nf_app_command_app_state_req_mode_encode(data->inputs.state_cmd);
-    bms_command.app_comm_rolling_count =
-        abs_bms_nf_app_command_app_comm_rolling_count_encode(data->internal.can_tick_counter);
-    bms_command.app_balancing_enable_f = abs_bms_nf_app_command_app_balancing_enable_f_encode(true);
-    bms_command.app_contactor_command =
-        data->inputs.close_contactors_cmd ? ABS_BMS_NF_APP_COMMAND_APP_CONTACTOR_COMMAND_CLOSE_CHOICE
-                                   : ABS_BMS_NF_APP_COMMAND_APP_CONTACTOR_COMMAND_OPEN_CHOICE;
+
+    if (data->inputs.sleep_cmd) {
+        bms_command.app_state_req_mode = ABS_BMS_NF_APP_COMMAND_APP_STATE_REQ_MODE_OFF_CHOICE;
+    } else if (data->inputs.charge_cmd) {
+        bms_command.app_state_req_mode = ABS_BMS_NF_APP_COMMAND_APP_STATE_REQ_MODE_CHARGE_CHOICE;
+        quiet = false;
+    } else if (data->inputs.run_cmd) {
+        bms_command.app_state_req_mode = ABS_BMS_NF_APP_COMMAND_APP_STATE_REQ_MODE_DISCHARGE_CHOICE;
+        quiet = false;
+    } else {
+        bms_command.app_state_req_mode = ABS_BMS_NF_APP_COMMAND_APP_STATE_REQ_MODE_IDLE_CHOICE;
+        quiet = false;
+    }
+
+    bms_command.app_comm_rolling_count = data->internal.can_tick_counter;
+    bms_command.app_balancing_enable_f = data->inputs.balance_cmd;
+    bms_command.app_contactor_command = (data->inputs.charge_cmd || data->inputs.run_cmd);
 
     abs_bms_nf_app_command_pack(buffer, &bms_command, ABS_BMS_NF_APP_COMMAND_LENGTH);
-    data->can_send(ABS_BMS_NF_APP_COMMAND_FRAME_ID, ABS_BMS_NF_APP_COMMAND_IS_EXTENDED,
-                   ABS_BMS_NF_APP_COMMAND_LENGTH, buffer);
+    if (!quiet)
+    {
+        data->config.can_send(ABS_BMS_NF_APP_COMMAND_FRAME_ID, ABS_BMS_NF_APP_COMMAND_IS_EXTENDED, ABS_BMS_NF_APP_COMMAND_LENGTH, buffer);
+    }
+
+     if (data->inputs.sleep_cmd)
+     {
+        quiet = true;
+    }
 }
 
 void abs_bms_nf_batt_state_deserialize(struct abs_bms_data_t* dst, const uint8_t* src) {
     struct abs_bms_nf_batt_state_t state;
     abs_bms_nf_batt_state_init(&state);
     abs_bms_nf_batt_state_unpack(&state, src, ABS_BMS_NF_BATT_STATE_LENGTH);
-    dst->outputs.bms_state = state.batt_sys_state;  // 1:1 with DBC.
+
+    switch (state.batt_sys_state)
+    {
+        case ABS_BMS_NF_BATT_STATE_BATT_SYS_STATE_STAND_BY_READY_CHOICE:
+        case ABS_BMS_NF_BATT_STATE_BATT_SYS_STATE_CONNECT_DRIVE_PRECHARGE_CHOICE:
+        case ABS_BMS_NF_BATT_STATE_BATT_SYS_STATE_CONNECT_DRIVE_BUS_JOIN_CHOICE:
+        case ABS_BMS_NF_BATT_STATE_BATT_SYS_STATE_CONNECT_DRIVE_STAGGER_CHOICE:
+        case ABS_BMS_NF_BATT_STATE_BATT_SYS_STATE_CONNECT_CHARGE_PRECHARGE_CHOICE:
+        case ABS_BMS_NF_BATT_STATE_BATT_SYS_STATE_CONNECT_CHARGE_BUS_JOIN_CHOICE:
+        case ABS_BMS_NF_BATT_STATE_BATT_SYS_STATE_CONNECT_CHARGE_STAGGER_CHOICE:
+        case ABS_BMS_NF_BATT_STATE_BATT_SYS_STATE_EXTERNAL_ISOLATION_TEST_DRIVE_CHOICE:
+        case ABS_BMS_NF_BATT_STATE_BATT_SYS_STATE_EXTERNAL_ISOLATION_TEST_CHARGE_CHOICE:
+            dst->outputs.state_ready = true;
+            dst->outputs.state_drive = false;
+            dst->outputs.state_charge = false;
+            dst->outputs.state_disconnect = false;
+            break;
+        case ABS_BMS_NF_BATT_STATE_BATT_SYS_STATE_DRIVE_CHOICE:
+            dst->outputs.state_ready = false;
+            dst->outputs.state_drive = true;
+            dst->outputs.state_charge = false;
+            dst->outputs.state_disconnect = false;
+            break;
+        case ABS_BMS_NF_BATT_STATE_BATT_SYS_STATE_CHARGE_CHOICE:
+            dst->outputs.state_ready = false;
+            dst->outputs.state_drive = false;
+            dst->outputs.state_charge = true;
+            dst->outputs.state_disconnect = false;
+            break;
+        case ABS_BMS_NF_BATT_STATE_BATT_SYS_STATE_DISCONNECT_CHOICE:
+            dst->outputs.state_ready = false;
+            dst->outputs.state_drive = false;
+            dst->outputs.state_charge = false;
+            dst->outputs.state_disconnect = true;
+            break;
+        default:
+            dst->outputs.state_ready = false;
+            dst->outputs.state_drive = false;
+            dst->outputs.state_charge = false;
+            dst->outputs.state_disconnect = false;
+            break;
+    }
+
     dst->outputs.bms_hvil_closed =
         ABS_BMS_NF_BATT_STATE_BATT_HVIL_STATUS_VALID_CHOICE == state.batt_hvil_status;
 }
@@ -260,12 +291,7 @@ void abs_bms_nf_batt_iso_res_frame_deserialize(struct abs_bms_data_t* dst, const
     struct abs_bms_nf_batt_iso_res_t state;
     abs_bms_nf_batt_iso_res_init(&state);
     abs_bms_nf_batt_iso_res_unpack(&state, src, ABS_BMS_NF_BATT_ISO_RES_LENGTH);
-    dst->outputs.iso_min_str_id =
-        abs_bms_nf_batt_iso_res_batt_iso_res_min_str_id_decode(state.batt_iso_res_min_str_id);
-    dst->outputs.iso_min = abs_bms_nf_batt_iso_res_batt_iso_res_min_decode(state.batt_iso_res_min);
-    dst->outputs.iso_max_str_id =
-        abs_bms_nf_batt_iso_res_batt_iso_res_max_str_id_decode(state.batt_iso_res_max_str_id);
-    dst->outputs.iso_max = abs_bms_nf_batt_iso_res_batt_iso_res_max_decode(state.batt_iso_res_max);
+    dst->outputs.isolation = abs_bms_nf_batt_iso_res_batt_iso_res_max_decode(state.batt_iso_res_max);
 }
 
 float abs_bms_user_soc_scale(const float soc) {

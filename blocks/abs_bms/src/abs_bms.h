@@ -5,16 +5,12 @@
 #include <stddef.h>
 #include <stdint.h>
 
-typedef void (*fp_can_send)(uint32_t, bool, uint8_t, uint8_t*);
-
 struct abs_bms_inputs_t {
-	float charge_power_available;  // Unit:kW
-    bool isolation_monitor_cmd;
-
-    uint8_t state_cmd;
-    bool close_contactors_cmd;
-
-    bool sleep_cmd;
+    bool sleep_cmd; // Notes: Active high sleep command
+    bool run_cmd; // Notes: Close contactors to enable discharge
+    bool charge_cmd; // Notes: Close contactors to enable charge
+    bool isolation_monitor_cmd; // Notes: Enable isolation monitoring
+    bool balance_cmd; // Notes: Enable cell balancing
 };
 
 struct abs_bms_outputs_t {
@@ -41,11 +37,15 @@ struct abs_bms_outputs_t {
     float min_cell_voltage;  // Unit:V
     float max_cell_voltage;  // Unit:V
 
-    uint8_t bms_state;
-    bool bms_hvil_closed;
-    bool isolation_monitor_enabled;
-    bool timeout;
-    bool bms_fault;
+    bool state_ready;   // Notes: BMS ready to close contactors
+    bool state_drive;   // Notes: BMS in drive state
+    bool state_charge;  // Notes: BMS in charge state
+    bool state_disconnect; // Notes: BMS requests disconnection of the pack
+
+    bool bms_hvil_closed;   // Notes: BMS HVIL status
+    bool isolation_monitor_enabled; // Notes: Isolation monitoring enabled
+    bool timeout;  // Notes: True if no CAN messages have been received recently
+    bool bms_fault; 
 };
 
 
@@ -57,7 +57,7 @@ struct abs_bms_internal_t {
 
 struct abs_bms_config_t {
 	uint8_t ticks_per_s;
-    fp_can_send can_send;
+	void (*can_send)(uint32_t, bool, uint8_t, uint8_t*); // ID, len, data buffer
 };
 
 struct abs_bms_data_t {
