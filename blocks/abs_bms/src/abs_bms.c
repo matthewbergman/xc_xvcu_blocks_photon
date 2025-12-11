@@ -93,6 +93,8 @@ void abs_bms_parse_can(uint32_t can_id, uint8_t* buf, struct abs_bms_data_t* dat
 }
 
 void abs_bms_tick(struct abs_bms_data_t* data) {
+    abs_bms_app_command_send(data);
+    
     counter_inc(&(data->internal.can_tick_counter));
     data->internal.startup_counter++;
     data->outputs.timeout = false;
